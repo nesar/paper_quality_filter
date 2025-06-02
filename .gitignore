@@ -34,3 +34,22 @@ papers*/
 
 # Logs
 *.log
+
+# Enhanced analysis outputs
+enhanced_analysis*/
+enhanced_analysis_*/
+analysis_*/
+
+# Benchmark and training data outputs
+benchmark/
+training_data/
+analysis_results/
+
+# Analysis summary files
+analysis_summary.json
+physics_reasoning_benchmark_*.json
+physics_training_data_*.json
+
+# Temporary analysis files
+temp_analysis/
+output_*/
