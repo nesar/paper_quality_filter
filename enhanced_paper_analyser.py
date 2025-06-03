@@ -20,6 +20,7 @@ from scrapers.vixra_scraper import ViXraScraper
 from analysis.pdf_processor import PDFProcessor
 from analysis.classifier import SubtlePhysicsClassifier
 from utils.categories import ARXIV_CATEGORIES, VIXRA_CATEGORIES
+from analysis.pdf_processor import EnhancedPDFProcessor
 
 # Configure logging
 logging.basicConfig(
@@ -281,6 +282,389 @@ class BenchmarkBuilder:
         
         logger.info(f"Benchmark saved to {filepath}")
         return str(filepath)
+
+class EnhancedBenchmarkBuilder(BenchmarkBuilder):
+    """Enhanced benchmark builder following UGPhysics standards"""
+    
+    def create_reasoning_benchmark(self, paper, assessment, full_text: str) -> Dict[str, Any]:
+        """Create UGPhysics-style reasoning benchmark"""
+        
+        if not self._is_suitable_for_benchmark_enhanced(paper, full_text):
+            return None
+        
+        clean_title = self._clean_title(paper.title)
+        clean_abstract = self._clean_abstract(paper.abstract)
+        
+        # Extract physics content with better parsing
+        physics_content = self._extract_physics_content_structured(full_text)
+        
+        if not physics_content:
+            return None
+        
+        # Create structured questions following UGPhysics methodology
+        questions = self._create_ugphysics_style_questions(
+            paper, assessment, physics_content, clean_abstract
+        )
+        
+        if len(questions) < 2:  # Need at least 2 quality questions
+            return None
+        
+        benchmark_item = {
+            "paper_metadata": {
+                "id": paper.id,
+                "title": clean_title,
+                "authors": paper.authors,
+                "subject": paper.subject,
+                "submission_date": paper.submission_date,
+                "source": "vixra" if "vixra" in paper.pdf_url else "arxiv"
+            },
+            "assessment_summary": {
+                "overall_score": assessment.overall_score,
+                "sophistication": assessment.physics_sophistication,
+                "recommendation": assessment.stage_3_recommendation,
+                "issues_count": len(assessment.subtle_issues)
+            },
+            "questions": questions,
+            "created_at": datetime.now().isoformat()
+        }
+        
+        return benchmark_item
+    
+    def _extract_physics_content_structured(self, text: str) -> Dict[str, Any]:
+        """Extract structured physics content for benchmark creation"""
+        
+        content = {
+            "equations": [],
+            "derivations": [],
+            "problem_solutions": [],
+            "physics_principles": [],
+            "mathematical_steps": []
+        }
+        
+        # Extract equations (LaTeX and plain text)
+        equation_patterns = [
+            r'\$\$.*?\$\$',  # Display math
+            r'\$.*?\$',      # Inline math  
+            r'\\begin\{equation\}.*?\\end\{equation\}',
+            r'[A-Za-z]\s*=\s*[^,.\n]{3,50}',  # Simple equations like E = mc^2
+            r'[∇∂].*?=.*?[^,.\n]{3,50}'       # Differential equations
+        ]
+        
+        for pattern in equation_patterns:
+            matches = re.findall(pattern, text, re.DOTALL)
+            content["equations"].extend([m.strip() for m in matches if len(m.strip()) > 5])
+        
+        # Extract derivations
+        derivation_patterns = [
+            r'(?:Derivation|Proof|To show|To derive).*?(?:Q\.E\.D\.|Therefore|Thus)[^.]*\.',
+            r'(?:Starting with|From|Given).*?(?:equation|relation).*?(?:we get|we obtain)[^.]*\.'
+        ]
+        
+        for pattern in derivation_patterns:
+            matches = re.findall(pattern, text, re.DOTALL | re.IGNORECASE)
+            content["derivations"].extend([m.strip() for m in matches if len(m.strip()) > 50])
+        
+        # Extract problem-solution pairs
+        problem_patterns = [
+            r'(?:Problem|Example|Exercise)\s*:?.*?(?:Solution|Answer).*?(?:\n\n|\Z)',
+            r'(?:Find|Calculate|Determine|Show).*?(?:Given|where).*?(?:Solution|Answer|Therefore).*?'
+        ]
+        
+        for pattern in problem_patterns:
+            matches = re.findall(pattern, text, re.DOTALL | re.IGNORECASE)
+            content["problem_solutions"].extend([m.strip() for m in matches if len(m.strip()) > 100])
+        
+        return content if any(content.values()) else None
+    
+    def _create_ugphysics_style_questions(self, paper, assessment, physics_content, abstract) -> List[Dict]:
+        """Create questions following UGPhysics format and standards"""
+        
+        questions = []
+        
+        # Question Type 1: Mathematical Derivation (like UGPhysics examples)
+        if physics_content["equations"] or physics_content["derivations"]:
+            derivation_question = self._create_derivation_question(
+                paper, physics_content, abstract
+            )
+            if derivation_question:
+                questions.append(derivation_question)
+        
+        # Question Type 2: Physics Reasoning (identifying flawed reasoning)
+        if assessment.subtle_issues:
+            reasoning_question = self._create_reasoning_analysis_question(
+                paper, assessment, abstract
+            )
+            if reasoning_question:
+                questions.append(reasoning_question)
+        
+        # Question Type 3: Problem Solving (if complete solutions exist)
+        if physics_content["problem_solutions"]:
+            problem_question = self._create_problem_solving_question(
+                paper, physics_content, abstract
+            )
+            if problem_question:
+                questions.append(problem_question)
+        
+        # Question Type 4: Physics Principles Application
+        physics_principles_question = self._create_principles_question(
+            paper, abstract, assessment
+        )
+        if physics_principles_question:
+            questions.append(physics_principles_question)
+        
+        return questions
+    
+    def _create_derivation_question(self, paper, physics_content, abstract) -> Optional[Dict]:
+        """Create mathematical derivation question like UGPhysics examples"""
+        
+        # Select best equation or derivation
+        best_content = None
+        if physics_content["derivations"]:
+            best_content = max(physics_content["derivations"], key=len)
+        elif physics_content["equations"]:
+            equations = [eq for eq in physics_content["equations"] if len(eq) > 20]
+            if equations:
+                best_content = equations[0]
+        
+        if not best_content or len(best_content) < 30:
+            return None
+        
+        question = {
+            "type": "mathematical_derivation",
+            "question": f"""Given the physics context from this work on {paper.subject.lower()}:
+
+Abstract: {abstract[:500]}...
+
+Analyze the following mathematical derivation and identify any errors in the mathematical reasoning, dimensional analysis, or application of physics principles:
+
+{best_content[:800]}
+
+Provide a detailed analysis of:
+1. Mathematical consistency of the derivation
+2. Proper application of physics principles
+3. Dimensional correctness of equations
+4. Any logical gaps or unjustified steps""",
+            
+            "context": {
+                "paper_id": paper.id,
+                "subject": paper.subject,
+                "derivation_type": "mathematical_derivation"
+            },
+            
+            "ground_truth": {
+                "analysis_type": "derivation_analysis",
+                "expected_issues": [
+                    "Mathematical inconsistencies may be present",
+                    "Physics principles may be misapplied", 
+                    "Dimensional analysis may reveal errors",
+                    "Logical gaps may exist in reasoning"
+                ],
+                "difficulty": "intermediate",
+                "reasoning_skills": ["mathematical_reasoning", "physics_application", "dimensional_analysis"]
+            }
+        }
+        
+        return question
+    
+    def _create_reasoning_analysis_question(self, paper, assessment, abstract) -> Optional[Dict]:
+        """Create reasoning analysis question based on identified issues"""
+        
+        if not assessment.subtle_issues:
+            return None
+        
+        # Focus on the most significant issues
+        key_issues = assessment.subtle_issues[:3]
+        
+        question = {
+            "type": "reasoning_analysis", 
+            "question": f"""Analyze the physics reasoning in this work on {paper.subject.lower()}:
+
+Abstract: {abstract[:500]}...
+
+This work has been identified as having potential reasoning issues. Examine the approach and methodology for:
+
+1. **Logical consistency**: Are the arguments internally consistent?
+2. **Physics assumptions**: Are the underlying physics assumptions valid?
+3. **Mathematical rigor**: Is the mathematical treatment appropriate?
+4. **Literature context**: How does this relate to established physics?
+
+Provide a critical analysis focusing on potential flaws in the reasoning process.""",
+            
+            "context": {
+                "paper_id": paper.id,
+                "subject": paper.subject,
+                "analysis_type": "reasoning_critique"
+            },
+            
+            "ground_truth": {
+                "identified_issues": key_issues,
+                "sophistication_level": assessment.physics_sophistication,
+                "recommendation": assessment.stage_3_recommendation,
+                "reasoning": assessment.reasoning[:500],
+                "analysis_focus": ["logical_consistency", "physics_assumptions", "mathematical_rigor"]
+            }
+        }
+        
+        return question
+    
+    def _create_problem_solving_question(self, paper, physics_content, abstract) -> Optional[Dict]:
+        """Create problem-solving question from extracted solutions"""
+        
+        if not physics_content["problem_solutions"]:
+            return None
+        
+        best_solution = max(physics_content["problem_solutions"], key=len)
+        
+        # Extract problem and solution parts
+        problem_part, solution_part = self._separate_problem_solution_advanced(best_solution)
+        
+        if len(problem_part) < 30 or len(solution_part) < 50:
+            return None
+        
+        question = {
+            "type": "problem_solving",
+            "question": f"""Consider this physics problem from the domain of {paper.subject.lower()}:
+
+**Problem**: {problem_part}
+
+**Proposed Solution**: {solution_part[:600]}...
+
+Evaluate this solution approach:
+1. Is the problem setup correct?
+2. Are the solution methods appropriate?
+3. Are there any errors in the mathematical steps?
+4. Is the final result reasonable?
+
+Provide a detailed critique of the solution methodology.""",
+            
+            "context": {
+                "paper_id": paper.id,
+                "subject": paper.subject,
+                "problem_type": "applied_physics"
+            },
+            
+            "ground_truth": {
+                "evaluation_criteria": [
+                    "Problem setup correctness",
+                    "Solution method appropriateness", 
+                    "Mathematical accuracy",
+                    "Result reasonableness"
+                ],
+                "solution_analysis": "Complete solution evaluation required",
+                "difficulty": "intermediate"
+            }
+        }
+        
+        return question
+    
+    def _create_principles_question(self, paper, abstract, assessment) -> Optional[Dict]:
+        """Create physics principles application question"""
+        
+        # Determine relevant physics principles based on subject
+        principles_map = {
+            "Quantum Physics": ["wave-particle duality", "uncertainty principle", "quantum superposition"],
+            "General Relativity": ["equivalence principle", "spacetime curvature", "geodesic motion"],
+            "Thermodynamics": ["conservation of energy", "entropy increase", "thermal equilibrium"],
+            "Electromagnetism": ["Maxwell's equations", "charge conservation", "electromagnetic induction"],
+            "High Energy Physics": ["conservation laws", "symmetry principles", "gauge invariance"]
+        }
+        
+        relevant_principles = []
+        for domain, principles in principles_map.items():
+            if domain.lower() in paper.subject.lower():
+                relevant_principles = principles
+                break
+        
+        if not relevant_principles:
+            relevant_principles = ["conservation of energy", "dimensional consistency", "physical reasonableness"]
+        
+        question = {
+            "type": "principles_application",
+            "question": f"""Examine this work in {paper.subject.lower()}:
+
+Abstract: {abstract[:400]}...
+
+Analyze how well this work applies fundamental physics principles. Consider:
+
+1. **Conservation Laws**: Are relevant conservation laws properly applied?
+2. **Symmetry Principles**: Are symmetries correctly identified and used?
+3. **Dimensional Analysis**: Is dimensional consistency maintained?
+4. **Physical Intuition**: Do the results align with physical expectations?
+
+Focus particularly on the application of: {', '.join(relevant_principles[:3])}
+
+Identify any violations or misapplications of these fundamental principles.""",
+            
+            "context": {
+                "paper_id": paper.id,
+                "subject": paper.subject,
+                "principles_focus": relevant_principles[:3]
+            },
+            
+            "ground_truth": {
+                "principles_to_check": relevant_principles,
+                "sophistication_required": assessment.physics_sophistication,
+                "expected_analysis": "Systematic evaluation of physics principles application",
+                "common_errors": [
+                    "Conservation law violations",
+                    "Dimensional inconsistencies", 
+                    "Symmetry misapplications",
+                    "Unphysical results"
+                ]
+            }
+        }
+        
+        return question
+    
+    def _separate_problem_solution_advanced(self, text: str) -> Tuple[str, str]:
+        """Advanced separation of problem and solution parts"""
+        
+        # Look for clear separators
+        separators = [
+            r'(?:Solution|Answer)\s*:',
+            r'(?:Given|Find|Calculate|Determine).*?(?:Solution|Answer)',
+            r'(?:Problem)\s*:.*?(?:Solution|Answer)\s*:'
+        ]
+        
+        for separator in separators:
+            match = re.search(separator, text, re.IGNORECASE | re.DOTALL)
+            if match:
+                split_point = match.end()
+                problem = text[:split_point].strip()
+                solution = text[split_point:].strip()
+                return problem, solution
+        
+        # If no clear separator, split roughly in half
+        mid_point = len(text) // 2
+        return text[:mid_point].strip(), text[mid_point:].strip()
+    
+    def _is_suitable_for_benchmark_enhanced(self, paper, full_text: str) -> bool:
+        """Enhanced suitability check for benchmark creation"""
+        
+        if not full_text or len(full_text.strip()) < 500:
+            return False
+        
+        # Check for substantial physics content
+        physics_indicators = [
+            'equation', 'theory', 'model', 'energy', 'force', 'field', 
+            'quantum', 'relativity', 'particle', 'wave', 'conservation'
+        ]
+        
+        # Check for mathematical content
+        math_indicators = [
+            'calculate', 'derive', 'solve', 'proof', 'theorem', 'formula',
+            'differential', 'integral', 'matrix', 'vector'
+        ]
+        
+        text_lower = full_text[:2000].lower()
+        physics_count = sum(1 for indicator in physics_indicators if indicator in text_lower)
+        math_count = sum(1 for indicator in math_indicators if indicator in text_lower)
+        
+        # More lenient for viXra papers but still require some content
+        is_vixra = "vixra" in paper.pdf_url.lower() if hasattr(paper, 'pdf_url') else False
+        threshold = 2 if is_vixra else 3
+        
+        return (physics_count + math_count) >= threshold
 
 class TrainingDataBuilder:
     """Builds training data for reinforcement learning with LLMs"""
@@ -746,6 +1130,280 @@ class TrainingDataBuilder:
             topic = example["metadata"]["topic"]
             distribution[topic] = distribution.get(topic, 0) + 1
         return distribution
+
+class EnhancedTrainingDataBuilder(TrainingDataBuilder):
+    """Enhanced training data builder following UGPhysics standards"""
+    
+    def _find_complete_derivations(self, text: str) -> List[str]:
+        """Find complete derivations with clear step-by-step structure following UGPhysics style"""
+        
+        # Enhanced patterns for physics derivations
+        derivation_patterns = [
+            # Mathematical derivation patterns (UGPhysics style)
+            r'(?:Given|Starting with|Consider|Let)\s+.*?(?:equation|formula|relation).*?(?:\n.*?)*?(?:Therefore|Thus|Hence|We obtain|Solution)\s*:?\s*.*?(?:\n.*?)*?(?=\n\n|\Z)',
+            
+            # Physics problem solving patterns
+            r'(?:Problem|Question)\s*:?\s*.*?(?:\n.*?)*?(?:Solution|Answer)\s*:?\s*.*?(?:\n.*?)*?(?:Therefore|Hence|Final answer)\s*:?\s*.*?(?=\n\n|\Z)',
+            
+            # Step-by-step mathematical derivations
+            r'(?:Step\s+\d+|First|Initially|Next|Then).*?(?:\n(?:Step\s+\d+|Next|Then|Finally|Therefore).*?)*(?:\n.*?)*?(?=\n\n|\Z)',
+            
+            # Physics law applications (like UGPhysics examples)
+            r'(?:Using|Applying|From)\s+(?:conservation|law|principle|theorem)\s+of\s+\w+.*?(?:\n.*?)*?(?:we get|we obtain|this gives)\s*:?\s*.*?(?=\n\n|\Z)',
+            
+            # Equation manipulations
+            r'(?:From\s+)?(?:equation|relation)\s*\(\d+\).*?(?:\n.*?)*?(?:substituting|rearranging|solving).*?(?:\n.*?)*?(?:we get|we obtain)\s*:?\s*.*?(?=\n\n|\Z)'
+        ]
+        
+        derivations = []
+        for pattern in derivation_patterns:
+            matches = re.findall(pattern, text, re.DOTALL | re.IGNORECASE)
+            for match in matches:
+                cleaned = self._clean_derivation_text(match)
+                if self._is_complete_derivation(cleaned):
+                    derivations.append(cleaned)
+        
+        return derivations[:5]  # Limit to best examples
+    
+    def _clean_derivation_text(self, text: str) -> str:
+        """Clean derivation text to ensure coherent reasoning chains"""
+        if not text:
+            return ""
+        
+        # Remove obvious OCR artifacts and formatting issues
+        text = re.sub(r'[^\x00-\x7F]+', '', text)  # Remove non-ASCII
+        text = re.sub(r'\s+', ' ', text)  # Normalize whitespace
+        text = re.sub(r'\.{3,}', '...', text)  # Normalize ellipses
+        text = re.sub(r'(?<=[a-z])(?=[A-Z])', ' ', text)  # Add spaces between words
+        
+        # Remove page numbers, references, and citations
+        text = re.sub(r'\[\d+\]', '', text)
+        text = re.sub(r'Page\s+\d+', '', text)
+        text = re.sub(r'Fig\.\s*\d+', '', text)
+        text = re.sub(r'Eq\.\s*\(\d+\)', '', text)
+        
+        # Ensure complete sentences
+        sentences = text.split('.')
+        complete_sentences = []
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if len(sentence) > 10 and self._is_meaningful_sentence(sentence):
+                complete_sentences.append(sentence)
+        
+        return '. '.join(complete_sentences) + '.' if complete_sentences else ""
+    
+    def _is_complete_derivation(self, text: str) -> bool:
+        """Check if text forms a complete, coherent derivation"""
+        if len(text) < 100:  # Too short
+            return False
+        
+        # Must have both starting point and conclusion
+        has_start = any(starter in text.lower() for starter in [
+            'given', 'starting with', 'consider', 'let', 'assume', 'suppose'
+        ])
+        has_conclusion = any(conclusion in text.lower() for conclusion in [
+            'therefore', 'thus', 'hence', 'we obtain', 'we get', 'solution', 'result'
+        ])
+        
+        if not (has_start and has_conclusion):
+            return False
+        
+        # Check for mathematical content
+        has_math = any(indicator in text.lower() for indicator in [
+            'equation', 'formula', 'derivative', 'integral', 'solve', 'calculate'
+        ])
+        
+        # Check for physics content
+        has_physics = any(concept in text.lower() for concept in [
+            'energy', 'force', 'field', 'particle', 'wave', 'quantum', 'mass', 'velocity'
+        ])
+        
+        return has_math or has_physics
+    
+    def _is_meaningful_sentence(self, sentence: str) -> bool:
+        """Check if sentence contains meaningful physics/math content"""
+        if len(sentence) < 15:
+            return False
+        
+        # Must contain some meaningful words
+        meaningful_words = ['equation', 'energy', 'force', 'calculate', 'derive', 'solve', 
+                           'therefore', 'using', 'given', 'find', 'determine']
+        word_count = sum(1 for word in meaningful_words if word in sentence.lower())
+        
+        # Must have reasonable word density
+        words = sentence.split()
+        if len(words) < 3:
+            return False
+        
+        return word_count > 0
+    
+    def _create_training_example(self, text_block: str, paper, example_type: str) -> Optional[Dict[str, Any]]:
+        """Create UGPhysics-style training example"""
+        
+        cleaned_text = self._clean_derivation_text(text_block)
+        if len(cleaned_text) < 100:
+            return None
+        
+        # Extract problem and solution following UGPhysics format
+        problem, solution_steps = self._extract_problem_solution_ugphysics_style(cleaned_text)
+        
+        if len(solution_steps) < 2:
+            return None
+        
+        # Enhanced difficulty assessment
+        difficulty = self._assess_difficulty_enhanced(cleaned_text)
+        topic = self._categorize_topic_enhanced(cleaned_text, paper.subject)
+        
+        training_example = {
+            "id": f"{paper.id}_{example_type}_{hash(cleaned_text) % 10000}",
+            "paper_metadata": {
+                "source_paper": paper.id,
+                "title": self._clean_title_for_training(paper.title),
+                "subject": paper.subject,
+                "authors": paper.authors
+            },
+            "problem_statement": problem,
+            "solution_steps": solution_steps,
+            "metadata": {
+                "difficulty": difficulty,
+                "topic": topic,
+                "example_type": example_type,
+                "step_count": len(solution_steps),
+                "prerequisites": self._identify_prerequisites_enhanced(cleaned_text),
+                "concepts": self._extract_physics_concepts_enhanced(cleaned_text),
+                "reasoning_type": self._classify_reasoning_type(cleaned_text)
+            },
+            "raw_text": self._limit_raw_text(cleaned_text),
+            "created_at": datetime.now().isoformat()
+        }
+        
+        return training_example
+    
+    def _extract_problem_solution_ugphysics_style(self, text: str) -> Tuple[str, List[str]]:
+        """Extract problem and solution in UGPhysics format"""
+        
+        # Look for explicit problem statements
+        problem_patterns = [
+            r'(?:Problem|Question)\s*:?\s*([^.]*\.(?:[^.]*\.)*)',
+            r'(?:Given|Consider|Find|Calculate|Determine|Show|Prove)\s+([^.]*\.(?:[^.]*\.)*)',
+            r'(?:A|An)\s+[^.]*(?:particle|wave|field|system)[^.]*\.(?:[^.]*\.)*'
+        ]
+        
+        problem = "Problem statement not clearly identified."
+        for pattern in problem_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                candidate = match.group(1).strip()
+                if len(candidate) > 30 and self._is_meaningful_sentence(candidate):
+                    problem = candidate
+                    break
+        
+        # Extract solution steps
+        steps = self._extract_solution_steps_enhanced(text)
+        
+        return problem, steps
+    
+    def _extract_solution_steps_enhanced(self, text: str) -> List[str]:
+        """Extract solution steps following UGPhysics methodology"""
+        
+        # Enhanced step patterns for physics problems
+        step_patterns = [
+            r'(?:Step\s+\d+|First|Initially|Next|Then|Finally)\s*:?\s*([^.]*\.)',
+            r'(?:Using|Applying|From|By)\s+(?:equation|formula|law|principle|conservation)\s+[^.]*\.',
+            r'(?:Substituting|Setting|With|Given)\s+[^.]*=.*?\.',
+            r'(?:Therefore|Thus|Hence|We obtain|We get|This gives)\s+[^.]*\.',
+            r'(?:The|A|An)\s+[^.]*(?:energy|force|momentum|velocity|acceleration)[^.]*\.',
+            r'(?:Solving|Calculating|Finding|Determining)\s+[^.]*\.'
+        ]
+        
+        steps = []
+        for pattern in step_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            for match in matches:
+                step = match.strip()
+                if len(step) > 20 and self._is_meaningful_step_enhanced(step):
+                    steps.append(step)
+        
+        # If no clear steps, try sentence-based extraction
+        if len(steps) < 2:
+            sentences = re.split(r'[.!?]+', text)
+            for sentence in sentences:
+                clean_sentence = sentence.strip()
+                if (len(clean_sentence) > 25 and 
+                    self._is_meaningful_step_enhanced(clean_sentence)):
+                    steps.append(clean_sentence)
+        
+        return steps[:8]  # Limit to reasonable number
+    
+    def _is_meaningful_step_enhanced(self, step: str) -> bool:
+        """Enhanced check for meaningful physics/math steps"""
+        step_lower = step.lower()
+        
+        # Physics/math indicators
+        physics_indicators = ['energy', 'force', 'field', 'particle', 'wave', 'momentum', 
+                             'velocity', 'acceleration', 'mass', 'charge', 'potential']
+        math_indicators = ['equation', 'formula', 'derivative', 'integral', 'solve', 
+                          'calculate', 'substitute', 'equal', 'therefore', 'hence']
+        
+        has_physics = any(indicator in step_lower for indicator in physics_indicators)
+        has_math = any(indicator in step_lower for indicator in math_indicators)
+        
+        # Avoid meaningless fragments
+        avoid_terms = ['page', 'figure', 'table', 'section', 'chapter', 'reference']
+        has_avoid = any(term in step_lower for term in avoid_terms)
+        
+        return (has_physics or has_math) and not has_avoid
+    
+    def _assess_difficulty_enhanced(self, text: str) -> str:
+        """Enhanced difficulty assessment for physics content"""
+        text_lower = text.lower()
+        
+        # Advanced physics concepts
+        advanced_concepts = [
+            'quantum field theory', 'general relativity', 'gauge theory', 
+            'renormalization', 'feynman diagram', 'lagrangian', 'hamiltonian',
+            'tensor', 'manifold', 'lie group', 'symmetry breaking'
+        ]
+        
+        # Intermediate concepts  
+        intermediate_concepts = [
+            'quantum mechanics', 'special relativity', 'electromagnetic field',
+            'statistical mechanics', 'thermodynamics', 'wave equation',
+            'schrodinger equation', 'maxwell equations', 'fourier transform'
+        ]
+        
+        # Mathematical complexity indicators
+        advanced_math = ['partial differential', 'tensor calculus', 'group theory', 
+                        'complex analysis', 'differential geometry']
+        intermediate_math = ['differential equation', 'linear algebra', 'calculus',
+                            'vector calculus', 'complex numbers']
+        
+        advanced_count = sum(1 for concept in advanced_concepts + advanced_math 
+                           if concept in text_lower)
+        intermediate_count = sum(1 for concept in intermediate_concepts + intermediate_math 
+                               if concept in text_lower)
+        
+        if advanced_count >= 2:
+            return "advanced"
+        elif intermediate_count >= 2 or advanced_count >= 1:
+            return "intermediate" 
+        else:
+            return "introductory"
+    
+    def _classify_reasoning_type(self, text: str) -> str:
+        """Classify the type of reasoning following UGPhysics categories"""
+        text_lower = text.lower()
+        
+        if any(term in text_lower for term in ['derive', 'derivation', 'proof', 'show that']):
+            return "mathematical_derivation"
+        elif any(term in text_lower for term in ['conservation', 'law', 'principle', 'theorem']):
+            return "law_application"  
+        elif any(term in text_lower for term in ['calculate', 'find', 'determine', 'solve']):
+            return "problem_solving"
+        elif any(term in text_lower for term in ['given', 'known', 'condition']):
+            return "knowledge_recall"
+        else:
+            return "reasoning_chain"
 
 async def run_enhanced_analysis(args):
     """Run the enhanced paper analysis pipeline"""
