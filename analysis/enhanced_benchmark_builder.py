@@ -1,7 +1,6 @@
 """
 Enhanced Benchmark Builder - Creates self-contained physics reasoning problems
-Following UGPhysics standards for rigorous benchmark creation
-Key improvement: NO references to original papers - fully self-contained problems
+Key improvement: Extract ACTUAL concepts from papers while keeping problems self-contained
 """
 
 import re
@@ -14,573 +13,431 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 class SelfContainedBenchmarkBuilder:
-    """Creates self-contained physics reasoning benchmarks without paper references"""
+    """Creates self-contained physics reasoning benchmarks using actual paper concepts"""
     
     def __init__(self, output_dir: str):
         self.output_dir = Path(output_dir)
         self.benchmark_dir = self.output_dir / "benchmark"
         self.benchmark_dir.mkdir(parents=True, exist_ok=True)
         
-        # Physics problem templates for different domains
-        self.problem_templates = self._load_problem_templates()
-        
     def create_self_contained_benchmark(self, paper, assessment, full_text: str) -> Optional[Dict[str, Any]]:
-        """Create benchmark with self-contained physics problems (NO paper references)"""
+        """Create benchmark using ACTUAL concepts from the paper while keeping problems self-contained"""
         
         if not self._is_suitable_for_benchmark(paper, full_text):
             return None
         
-        # Extract physics content and concepts (NOT paper details)
-        physics_content = self._extract_physics_concepts_detailed(full_text)
-        if not physics_content:
+        # Extract ACTUAL physics content from the paper
+        extracted_concepts = self._extract_actual_concepts_from_paper(full_text, paper.subject)
+        if not extracted_concepts:
             return None
         
-        # Generate self-contained problems based on extracted concepts
-        problems = self._generate_self_contained_problems(
-            physics_content, paper.subject, assessment
+        # Generate problems based on ACTUAL extracted concepts
+        problems = self._generate_problems_from_extracted_concepts(
+            extracted_concepts, paper, assessment
         )
         
-        if len(problems) < 2:
+        if len(problems) < 1:
             return None
         
         benchmark_item = {
             "metadata": {
+                "source_paper": {
+                    "id": paper.id,
+                    "title": paper.title,
+                    "subject": paper.subject,
+                    "authors": paper.authors
+                },
                 "domain": self._classify_physics_domain(paper.subject),
-                "difficulty_level": self._assess_problem_difficulty(physics_content),
+                "difficulty_level": self._assess_problem_difficulty(extracted_concepts),
                 "problem_count": len(problems),
                 "created_at": datetime.now().isoformat(),
                 "version": "2.0",
-                "source_type": "physics_concept_extraction"  # NOT paper reference
+                "extraction_method": "actual_paper_concepts"
             },
             "problems": problems
         }
         
         return benchmark_item
     
-    def _extract_physics_concepts_detailed(self, text: str) -> Dict[str, Any]:
-        """Extract detailed physics concepts and mathematical structures"""
+    def _extract_actual_concepts_from_paper(self, text: str, subject: str) -> Dict[str, Any]:
+        """Extract ACTUAL physics concepts from the paper text"""
         
         concepts = {
             "equations": [],
-            "physical_laws": [],
-            "mathematical_methods": [],
-            "problem_scenarios": [],
-            "key_variables": [],
-            "physics_principles": []
+            "derivations": [],
+            "physical_scenarios": [],
+            "mathematical_expressions": [],
+            "physics_principles": [],
+            "numerical_values": [],
+            "problem_setups": []
         }
         
-        # Extract equations with context (clean, no paper references)
+        # Extract actual equations from the paper
         equation_patterns = [
-            r'([A-Za-z]\s*=\s*[^,.\n]{10,100})',  # Variable equations
-            r'(\\frac\{[^}]+\}\{[^}]+\}[^.]{0,50})',  # Fraction expressions
-            r'((?:F|E|V|p|m|v|a|g)\s*=\s*[^,.\n]{5,80})',  # Physics variables
+            r'([A-Za-z_]\w*\s*=\s*[^,.\n]{10,80})',  # Variable definitions
+            r'(\\frac\{[^}]+\}\{[^}]+\}(?:\s*[=+\-]\s*[^.]{0,50})?)',  # Fraction expressions
+            r'((?:E|F|V|p|m|v|a|g|H|L|T|P)\s*=\s*[^,.\n]{5,60})',  # Physics variables
+            r'(∇[^.]{5,50})',  # Gradient expressions
+            r'(∂[^.]{5,50})',  # Partial derivatives
         ]
         
         for pattern in equation_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for match in matches:
-                clean_eq = self._clean_equation(match)
-                if clean_eq and len(clean_eq) > 5:
-                    concepts["equations"].append(clean_eq)
+                cleaned = self._clean_equation(match)
+                if cleaned and self._is_meaningful_equation(cleaned):
+                    concepts["equations"].append(cleaned)
         
-        # Extract physical laws and principles
-        law_patterns = [
-            r'(conservation of \w+)',
-            r'(Newton\'?s? \w+ law)',
-            r'(Maxwell\'?s? equations?)',
-            r'(Schr[öo]dinger equation)',
-            r'(Einstein\'?s? \w+ relativity)',
-            r'(thermodynamic \w+ law)',
+        # Extract derivation segments
+        derivation_patterns = [
+            r'(?:Starting with|Beginning with|From|Given)\s+([^.]*?(?:equation|formula|relation)[^.]*?)(?:\.|\n)',
+            r'(?:Substituting|Using|Applying)\s+([^.]*?(?:=|into|yields?)[^.]*?)(?:\.|\n)',
+            r'(?:Therefore|Thus|Hence)\s+([^.]*?=\s*[^.]*?)(?:\.|\n)',
         ]
         
-        for pattern in law_patterns:
+        for pattern in derivation_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
-            concepts["physical_laws"].extend([m.lower() for m in matches])
+            for match in matches:
+                cleaned = match.strip()
+                if len(cleaned) > 20 and self._contains_physics_content(cleaned):
+                    concepts["derivations"].append(cleaned)
         
-        # Extract mathematical methods
-        method_patterns = [
-            r'(differential equation)',
-            r'(integration by parts)',
-            r'(Taylor expansion)',
-            r'(Fourier transform)',
-            r'(eigenvalue problem)',
-            r'(perturbation theory)',
-        ]
-        
-        for pattern in method_patterns:
-            matches = re.findall(pattern, text, re.IGNORECASE)
-            concepts["mathematical_methods"].extend([m.lower() for m in matches])
-        
-        # Extract physical scenarios (for problem generation)
+        # Extract physical scenarios described in the paper
         scenario_patterns = [
-            r'(particle in a \w+ potential)',
-            r'(\w+ oscillator)',
-            r'(electromagnetic field in \w+)',
-            r'(wave propagation in \w+)',
-            r'(quantum system with \w+)',
+            r'(?:Consider|Suppose|Let|Assume)\s+([^.]*?(?:particle|system|field|wave|oscillator|potential)[^.]*?)(?:\.|\n)',
+            r'(?:In this|Our|The)\s+([^.]*?(?:experiment|setup|system|model|approach)[^.]*?)(?:\.|\n)',
+            r'(?:We study|We consider|We analyze)\s+([^.]*?)(?:\.|\n)',
         ]
         
         for pattern in scenario_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
-            concepts["problem_scenarios"].extend([m.lower() for m in matches])
+            for match in matches:
+                cleaned = match.strip()
+                if len(cleaned) > 30 and self._contains_physics_content(cleaned):
+                    concepts["physical_scenarios"].append(cleaned)
         
-        return concepts if any(concepts.values()) else None
+        # Extract numerical values with context
+        numerical_patterns = [
+            r'([A-Za-z_]\w*\s*=\s*[0-9]+\.?[0-9]*(?:\s*×\s*10[⁻⁰-⁹]+)?\s*(?:m|kg|s|Hz|eV|K|Pa|N|J|W|V|A|T|rad)?\b)',
+            r'((?:wavelength|frequency|energy|mass|velocity|temperature|pressure)\s*(?:of|=|is)\s*[0-9]+[^.\n]*)',
+        ]
+        
+        for pattern in numerical_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            for match in matches:
+                if self._is_meaningful_numerical_value(match):
+                    concepts["numerical_values"].append(match.strip())
+        
+        # Extract physics principles mentioned
+        principles_patterns = [
+            r'(conservation of \w+[^.]*)',
+            r'(Newton\'?s? \w+ law[^.]*)',
+            r'(Maxwell\'?s? equations?[^.]*)',
+            r'(Schr[öo]dinger equation[^.]*)',
+            r'(uncertainty principle[^.]*)',
+            r'(thermodynamic \w+ law[^.]*)',
+        ]
+        
+        for pattern in principles_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            concepts["physics_principles"].extend([m.strip() for m in matches])
+        
+        return concepts if any(len(v) > 0 for v in concepts.values()) else None
     
-    def _generate_self_contained_problems(self, physics_content: Dict, subject: str, assessment) -> List[Dict]:
-        """Generate self-contained physics problems based on extracted concepts"""
+    def _generate_problems_from_extracted_concepts(self, concepts: Dict, paper, assessment) -> List[Dict]:
+        """Generate problems using ACTUAL extracted concepts from the paper"""
         
         problems = []
-        domain = self._classify_physics_domain(subject)
         
-        # Problem Type 1: Mathematical Derivation (most rigorous)
-        if physics_content["equations"]:
-            derivation_problem = self._create_derivation_problem(
-                physics_content, domain, assessment
-            )
+        # Problem Type 1: Mathematical Derivation using actual equations
+        if concepts["equations"] or concepts["derivations"]:
+            derivation_problem = self._create_derivation_from_actual_content(concepts, paper)
             if derivation_problem:
                 problems.append(derivation_problem)
         
-        # Problem Type 2: Conceptual Analysis
-        if physics_content["physical_laws"]:
-            conceptual_problem = self._create_conceptual_problem(
-                physics_content, domain, assessment
-            )
-            if conceptual_problem:
-                problems.append(conceptual_problem)
+        # Problem Type 2: Physical Scenario Analysis using actual scenarios
+        if concepts["physical_scenarios"]:
+            scenario_problem = self._create_scenario_analysis_problem(concepts, paper)
+            if scenario_problem:
+                problems.append(scenario_problem)
         
-        # Problem Type 3: Error Detection (based on assessment issues)
-        if assessment.subtle_issues:
-            error_problem = self._create_error_detection_problem(
-                physics_content, domain, assessment
-            )
+        # Problem Type 3: Error Detection based on assessment issues
+        if assessment.subtle_issues and concepts["equations"]:
+            error_problem = self._create_error_detection_from_concepts(concepts, paper, assessment)
             if error_problem:
                 problems.append(error_problem)
         
-        # Problem Type 4: Application Problem
-        if physics_content["problem_scenarios"]:
-            application_problem = self._create_application_problem(
-                physics_content, domain, assessment
-            )
-            if application_problem:
-                problems.append(application_problem)
+        # Problem Type 4: Numerical Calculation using actual values
+        if concepts["numerical_values"]:
+            numerical_problem = self._create_numerical_problem_from_paper(concepts, paper)
+            if numerical_problem:
+                problems.append(numerical_problem)
         
         return problems
     
-    def _create_derivation_problem(self, physics_content: Dict, domain: str, assessment) -> Optional[Dict]:
-        """Create mathematical derivation problem (UGPhysics style)"""
+    def _create_derivation_from_actual_content(self, concepts: Dict, paper) -> Optional[Dict]:
+        """Create derivation problem using actual equations/derivations from the paper"""
         
-        if not physics_content["equations"]:
+        # Use actual equations from the paper
+        primary_equation = concepts["equations"][0] if concepts["equations"] else None
+        derivation_steps = concepts["derivations"][:3] if concepts["derivations"] else []
+        
+        if not primary_equation and not derivation_steps:
             return None
         
-        # Generate problem based on domain
-        if domain == "mechanics":
-            problem = self._create_mechanics_derivation()
-        elif domain == "electromagnetism":
-            problem = self._create_em_derivation()
-        elif domain == "quantum":
-            problem = self._create_quantum_derivation()
-        elif domain == "thermodynamics":
-            problem = self._create_thermo_derivation()
-        else:
-            problem = self._create_general_derivation()
+        # Create problem statement using actual content
+        problem_statement = f"""Consider the physical system described by the following relationship:
+
+{primary_equation if primary_equation else "Mathematical relationship from the given context"}
+
+"""
         
-        if not problem:
-            return None
+        if derivation_steps:
+            problem_statement += "The derivation proceeds through these steps:\n"
+            for i, step in enumerate(derivation_steps, 1):
+                problem_statement += f"{i}. {step}\n"
+            problem_statement += "\n"
+        
+        problem_statement += """Analyze this derivation and:
+1. Verify the mathematical consistency of each step
+2. Check the physical reasoning behind the approach
+3. Identify any assumptions or approximations made
+4. Determine if the final result is dimensionally correct
+5. Suggest alternative approaches if applicable
+
+Provide a complete analysis of the mathematical and physical reasoning."""
         
         return {
-            "problem_id": f"derivation_{domain}_{hash(str(physics_content['equations'])) % 10000}",
-            "type": "mathematical_derivation",
+            "problem_id": f"derivation_from_paper_{paper.id}_{hash(primary_equation or str(derivation_steps)) % 10000}",
+            "type": "mathematical_derivation_analysis",
             "difficulty": "intermediate",
-            "domain": domain,
-            "problem_statement": problem["statement"],
-            "solution_outline": problem["solution"],
+            "domain": self._classify_physics_domain(paper.subject),
+            "problem_statement": problem_statement,
+            "source_content": {
+                "primary_equation": primary_equation,
+                "derivation_steps": derivation_steps,
+                "paper_context": f"From {paper.subject} research"
+            },
             "evaluation_criteria": [
-                "Mathematical rigor and correctness",
-                "Proper application of physics principles",
-                "Dimensional consistency",
-                "Logical flow of derivation"
-            ],
-            "common_errors": problem.get("common_errors", [
-                "Sign errors in mathematical steps",
-                "Incorrect application of boundary conditions", 
-                "Dimensional inconsistencies",
-                "Missing physical assumptions"
-            ])
-        }
-    
-    def _create_mechanics_derivation(self) -> Dict:
-        """Create mechanics derivation problem (completely self-contained)"""
-        
-        return {
-            "statement": """Consider a particle of mass m moving under the influence of a conservative force F = -dV/dx, where V(x) is the potential energy.
-
-Starting from Newton's second law and the definition of potential energy, derive the equation for the total mechanical energy E = K + V, where K is kinetic energy.
-
-Show that for conservative forces, the total mechanical energy is conserved (dE/dt = 0).
-
-Provide a complete mathematical derivation including:
-1. Statement of Newton's second law
-2. Definition of kinetic energy
-3. Work-energy theorem application
-4. Proof of energy conservation""",
-            
-            "solution": """1. Start with Newton's second law: F = ma = m(dv/dt)
-2. Use chain rule: dv/dt = (dv/dx)(dx/dt) = v(dv/dx)
-3. Therefore: F = mv(dv/dx)
-4. For conservative force: F = -dV/dx
-5. Multiply both sides by dx: F dx = mv dv
-6. Integrate: ∫F dx = ∫mv dv
-7. This gives: -ΔV = ½mv² - ½mv₀²
-8. Rearranging: ½mv² + V = ½mv₀² + V₀ = constant
-9. Therefore: E = K + V = constant (energy conservation)""",
-            
-            "common_errors": [
-                "Forgetting the negative sign in F = -dV/dx",
-                "Incorrect application of chain rule for dv/dt",
-                "Sign errors when integrating the work integral",
-                "Not recognizing that the constant represents total energy"
+                "Mathematical rigor in step verification",
+                "Understanding of physical principles",
+                "Dimensional analysis accuracy",
+                "Recognition of assumptions and limitations"
             ]
         }
     
-    def _create_em_derivation(self) -> Dict:
-        """Create electromagnetism derivation problem"""
+    def _create_scenario_analysis_problem(self, concepts: Dict, paper) -> Optional[Dict]:
+        """Create problem analyzing actual physical scenarios from the paper"""
         
-        return {
-            "statement": """Consider a point charge q moving with velocity v in uniform electric and magnetic fields E and B.
-
-Derive the Lorentz force equation F = q(E + v × B) from first principles.
-
-Your derivation should include:
-1. The electric force component and its physical origin
-2. The magnetic force component and why it's perpendicular to velocity
-3. The significance of the cross product v × B
-4. Discussion of when each component dominates
-
-Explain the physical meaning of each term and the conditions under which this equation applies.""",
-            
-            "solution": """1. Electric force on charge: F_E = qE (Coulomb's law)
-   - Force is parallel/antiparallel to E field
-   - Does work on charge (can change kinetic energy)
-   
-2. Magnetic force arises from Lorentz transformation of fields
-   - Moving charge experiences force perpendicular to both v and B
-   - Magnetic force: F_B = q(v × B)
-   - Magnitude: |F_B| = qvB sin θ where θ is angle between v and B
-   
-3. Total electromagnetic force: F = F_E + F_B = q(E + v × B)
-
-4. Physical significance:
-   - Electric term: can do work, changes particle energy
-   - Magnetic term: always perpendicular to v, does no work
-   - For v << c: magnetic term often negligible
-   - Cross product ensures F_B ⊥ v and F_B ⊥ B"""
-        }
-    
-    def _create_quantum_derivation(self) -> Dict:
-        """Create quantum mechanics derivation problem"""
-        
-        return {
-            "statement": """For a quantum mechanical particle in a one-dimensional infinite square well of width L (0 ≤ x ≤ L), derive the allowed energy levels.
-
-Starting from the time-independent Schrödinger equation, show that:
-1. The wave function must be zero at the boundaries
-2. The allowed wave functions are ψₙ(x) = √(2/L) sin(nπx/L)
-3. The energy eigenvalues are Eₙ = n²π²ℏ²/(2mL²)
-
-Include proper normalization and explain the physical significance of the quantum number n.""",
-            
-            "solution": """1. Time-independent Schrödinger equation: -ℏ²/(2m) d²ψ/dx² = Eψ
-2. Inside well (V=0): d²ψ/dx² = -k²ψ where k² = 2mE/ℏ²
-3. General solution: ψ(x) = A sin(kx) + B cos(kx)
-4. Boundary conditions: ψ(0) = 0 and ψ(L) = 0
-5. From ψ(0) = 0: B = 0, so ψ(x) = A sin(kx)
-6. From ψ(L) = 0: sin(kL) = 0, therefore kL = nπ (n = 1,2,3,...)
-7. This gives: k = nπ/L, so E = n²π²ℏ²/(2mL²)
-8. Normalization: ∫₀ᴸ |ψ|² dx = 1 gives A = √(2/L)
-9. Physical meaning: n determines energy level, larger n = higher energy"""
-        }
-    
-    def _create_thermo_derivation(self) -> Dict:
-        """Create thermodynamics derivation problem"""
-        
-        return {
-            "statement": """For an ideal gas undergoing a reversible adiabatic process, derive the relationship PVᵞ = constant, where γ = Cp/Cv.
-
-Start with the first law of thermodynamics and the ideal gas law. Show that:
-1. For an adiabatic process, dQ = 0
-2. The relationship between temperature and volume: TVᵞ⁻¹ = constant
-3. The pressure-volume relationship: PVᵞ = constant
-
-Explain the physical significance of the adiabatic index γ.""",
-            
-            "solution": """1. First law: dU = dQ - dW, for adiabatic process dQ = 0
-2. For ideal gas: dU = nCᵥdT, dW = PdV
-3. Therefore: nCᵥdT = -PdV
-4. From ideal gas law: PV = nRT, so P = nRT/V
-5. Substituting: nCᵥdT = -(nRT/V)dV
-6. Simplifying: CᵥdT = -RT(dV/V)
-7. Rearranging: dT/T = -(R/Cᵥ)(dV/V)
-8. Since γ = Cp/Cᵥ and Cp - Cᵥ = R: γ-1 = R/Cᵥ
-9. Therefore: dT/T = -(γ-1)(dV/V)
-10. Integrating: ln(T) = -(γ-1)ln(V) + constant
-11. This gives: TVᵞ⁻¹ = constant
-12. Using PV = nRT: PVᵞ = constant"""
-        }
-    
-    def _create_general_derivation(self) -> Dict:
-        """Create general physics derivation problem"""
-        
-        return {
-            "statement": """Using dimensional analysis, derive the general form of the relationship between physical quantities in a system characterized by:
-- A characteristic length scale L
-- A characteristic time scale T  
-- A characteristic energy scale E
-- A characteristic mass scale M
-
-Show how dimensional consistency constrains the possible functional relationships between these quantities. Apply the Buckingham π theorem to find dimensionless combinations.""",
-            
-            "solution": """1. Identify dimensions: [L], [T], [E] = ML²T⁻², [M]
-2. Any physical relationship must be dimensionally consistent
-3. For relationship f(L,T,E,M) = 0, use Buckingham π theorem
-4. Number of dimensionless groups = 4 variables - 3 dimensions = 1
-5. Form dimensionless combination: π = E T² / (M L²)
-6. This must be a dimensionless constant
-7. Therefore: E ∝ ML²/T² (consistent with kinetic energy form)
-8. Alternative combinations: vT/L, Et²/(ML²), etc."""
-        }
-    
-    def _create_conceptual_problem(self, physics_content: Dict, domain: str, assessment) -> Optional[Dict]:
-        """Create conceptual understanding problem"""
-        
-        laws = physics_content.get("physical_laws", [])
-        if not laws:
+        if not concepts["physical_scenarios"]:
             return None
         
-        primary_law = laws[0]
+        primary_scenario = concepts["physical_scenarios"][0]
+        related_principles = concepts["physics_principles"][:2] if concepts["physics_principles"] else []
+        
+        problem_statement = f"""Consider the following physical scenario:
+
+{primary_scenario}
+
+"""
+        
+        if related_principles:
+            problem_statement += "This system involves the following physics principles:\n"
+            for principle in related_principles:
+                problem_statement += f"• {principle}\n"
+            problem_statement += "\n"
+        
+        problem_statement += """Analyze this physical system by addressing:
+
+1. **System Setup**: What are the key physical quantities and their relationships?
+2. **Governing Principles**: Which fundamental laws of physics apply to this system?
+3. **Mathematical Model**: How would you set up equations to describe this system?
+4. **Approximations**: What simplifying assumptions might be reasonable?
+5. **Predictions**: What physical behavior would you expect to observe?
+6. **Experimental Considerations**: How could this system be studied experimentally?
+
+Provide a comprehensive physics analysis of this scenario."""
         
         return {
-            "problem_id": f"conceptual_{domain}_{hash(primary_law) % 10000}",
-            "type": "conceptual_analysis",
+            "problem_id": f"scenario_analysis_{paper.id}_{hash(primary_scenario) % 10000}",
+            "type": "physical_scenario_analysis",
             "difficulty": "intermediate",
-            "domain": domain,
-            "problem_statement": self._generate_conceptual_statement(primary_law, domain),
+            "domain": self._classify_physics_domain(paper.subject),
+            "problem_statement": problem_statement,
+            "source_content": {
+                "primary_scenario": primary_scenario,
+                "related_principles": related_principles
+            },
             "evaluation_criteria": [
-                "Understanding of underlying physics principles",
-                "Ability to connect different concepts",
-                "Recognition of assumptions and limitations",
-                "Clear physical reasoning"
-            ],
-            "common_misconceptions": [
-                "Confusing necessary vs sufficient conditions",
-                "Misunderstanding the scope of applicability",
-                "Incorrect causal relationships",
-                "Oversimplification of complex phenomena"
+                "Understanding of physical setup",
+                "Correct application of physics principles",
+                "Mathematical modeling ability",
+                "Recognition of approximations and limitations"
             ]
         }
     
-    def _generate_conceptual_statement(self, law: str, domain: str) -> str:
-        """Generate conceptual problem statement"""
+    def _create_error_detection_from_concepts(self, concepts: Dict, paper, assessment) -> Optional[Dict]:
+        """Create error detection problem using actual content and identified issues"""
         
-        if "conservation" in law:
-            return """Analyze the principle of conservation laws in physics.
-
-Consider a physical system where energy appears to be "lost" due to friction or other dissipative processes.
-
-Explain:
-1. How conservation of energy is maintained at the microscopic level
-2. The role of entropy in understanding energy "loss"
-3. The difference between conserved and non-conserved quantities
-4. When conservation laws can be violated and under what circumstances
-
-Provide specific examples where apparent violations of conservation laws led to the discovery of new physics principles."""
-        
-        elif "newton" in law:
-            return """Examine Newton's laws of motion and their domain of applicability.
-
-Consider scenarios where Newton's laws might appear to fail or require modification:
-1. Motion at very high speeds (approaching speed of light)
-2. Motion of very small particles (quantum scale)
-3. Motion in strong gravitational fields
-4. Non-inertial reference frames
-
-For each scenario, explain:
-- Why classical mechanics breaks down
-- What new physics principles are needed
-- How the classical laws emerge as limiting cases
-- The experimental evidence for these modifications"""
-        
-        else:
-            return f"""Analyze the physical principle of {law} and its applications.
-
-Discuss:
-1. The fundamental assumptions underlying this principle
-2. The mathematical formulation and its physical meaning
-3. Situations where this principle applies vs where it breaks down
-4. How this principle connects to other areas of physics
-5. Experimental tests and confirmations of this principle
-
-Provide examples of how violations or extensions of this principle have led to new discoveries in physics."""
-    
-    def _create_error_detection_problem(self, physics_content: Dict, domain: str, assessment) -> Optional[Dict]:
-        """Create error detection and analysis problem"""
-        
-        if not assessment.subtle_issues:
+        if not concepts["equations"] or not assessment.subtle_issues:
             return None
         
-        # Create a problem with deliberate errors based on the assessment
-        error_types = self._categorize_errors(assessment.subtle_issues)
+        primary_equation = concepts["equations"][0]
+        key_issues = assessment.subtle_issues[:2]
+        
+        # Create a problem with potential errors based on the assessment
+        problem_statement = f"""The following analysis presents a physical relationship and its derivation:
+
+**Key Equation**: {primary_equation}
+
+**Potential Issues Identified**:
+"""
+        
+        for i, issue in enumerate(key_issues, 1):
+            problem_statement += f"{i}. {issue}\n"
+        
+        problem_statement += f"""
+**Assessment Context**: This work has been identified as having sophistication level {assessment.physics_sophistication:.2f} with recommendation: {assessment.stage_3_recommendation}
+
+**Your Task**:
+1. Analyze the equation and derivation for mathematical errors
+2. Check for physics principle violations
+3. Verify dimensional consistency
+4. Identify any logical inconsistencies
+5. Assess whether the identified issues are valid concerns
+6. Propose corrections where necessary
+
+Focus particularly on subtle errors that might not be immediately obvious but could invalidate the physics reasoning."""
         
         return {
-            "problem_id": f"error_detection_{domain}_{hash(str(assessment.subtle_issues)) % 10000}",
-            "type": "error_detection",
+            "problem_id": f"error_detection_{paper.id}_{hash(str(key_issues)) % 10000}",
+            "type": "error_detection_analysis",
             "difficulty": "advanced",
-            "domain": domain,
-            "problem_statement": self._generate_error_detection_statement(error_types, domain),
-            "error_categories": error_types,
+            "domain": self._classify_physics_domain(paper.subject),
+            "problem_statement": problem_statement,
+            "source_content": {
+                "primary_equation": primary_equation,
+                "identified_issues": key_issues,
+                "sophistication_level": assessment.physics_sophistication
+            },
             "evaluation_criteria": [
-                "Identification of specific errors",
-                "Understanding of correct physics principles",
-                "Ability to distinguish subtle vs obvious mistakes",
-                "Provision of correct solutions"
+                "Identification of mathematical errors",
+                "Recognition of physics principle violations",
+                "Dimensional analysis accuracy",
+                "Critical evaluation of identified issues"
             ]
         }
     
-    def _generate_error_detection_statement(self, error_types: List[str], domain: str) -> str:
-        """Generate error detection problem with embedded mistakes"""
+    def _create_numerical_problem_from_paper(self, concepts: Dict, paper) -> Optional[Dict]:
+        """Create numerical calculation problem using actual values from the paper"""
         
-        if "dimensional" in error_types:
-            return """The following derivation attempts to find the period of a simple pendulum:
-
-Given: A pendulum of length L and mass m in gravitational field g
-Starting from energy conservation: ½mω²A² = mgL(1 - cos θ)
-For small angles: cos θ ≈ 1 - θ²/2
-Therefore: ½mω²A² = mgLθ²/2
-Since A = Lθ for small oscillations: ½mω²L²θ² = mgLθ²/2
-Simplifying: ω²L = g
-Therefore: ω = √(g/L)
-The period is: T = 2π/ω = 2π√(L/g)
-
-However, dimensional analysis gives: T ~ √(L·m/g)
-
-Identify and correct all errors in this derivation. Explain why the dimensional analysis result is incorrect and provide the correct dimensional reasoning."""
-        
-        elif "mathematical" in error_types:
-            return """A student derives the kinetic energy of a relativistic particle:
-
-Starting with: E² = (pc)² + (mc²)²
-The total energy is: E = γmc² where γ = 1/√(1-v²/c²)
-The momentum is: p = γmv
-Substituting: (γmc²)² = (γmvc)² + (mc²)²
-Expanding: γ²m²c⁴ = γ²m²v²c² + m²c⁴
-Simplifying: γ²c⁴ = γ²v²c² + c⁴
-Dividing by c⁴: γ² = γ²v²/c² + 1
-Therefore: γ²(1 - v²/c²) = 1
-This gives: γ = 1/√(1-v²/c²) ✓
-
-The kinetic energy is: K = E - mc² = γmc² - mc² = mc²(γ - 1)
-For small velocities: γ ≈ 1 + v²/(2c²)
-Therefore: K ≈ mc²(v²/(2c²)) = mv²/2 ✓
-
-Find and explain the error in the reasoning that leads to an apparently correct result."""
-        
-        else:
-            return """Analyze the following physics argument for errors in reasoning:
-
-"Since quantum mechanics is probabilistic, it means that electrons don't have definite positions until measured. This implies that the electron can be anywhere in the universe with some probability. However, we know electrons are confined to atoms, which means there must be some force keeping them there even when not observed. This force must be non-quantum in nature since quantum mechanics only gives probabilities."
-
-Identify the conceptual errors and misconceptions in this reasoning. Provide a correct explanation of:
-1. What quantum mechanical probability means
-2. How confinement works in quantum systems
-3. The relationship between measurement and physical reality in quantum mechanics"""
-    
-    def _categorize_errors(self, subtle_issues: List[str]) -> List[str]:
-        """Categorize types of errors found"""
-        categories = []
-        
-        for issue in subtle_issues:
-            issue_lower = issue.lower()
-            if any(term in issue_lower for term in ["dimensional", "dimension", "unit"]):
-                categories.append("dimensional")
-            elif any(term in issue_lower for term in ["math", "equation", "calculation"]):
-                categories.append("mathematical")
-            elif any(term in issue_lower for term in ["assumption", "approximation"]):
-                categories.append("physics_assumptions")
-            elif any(term in issue_lower for term in ["logic", "reasoning", "contradiction"]):
-                categories.append("logical")
-            else:
-                categories.append("conceptual")
-        
-        return list(set(categories))
-    
-    def _create_application_problem(self, physics_content: Dict, domain: str, assessment) -> Optional[Dict]:
-        """Create practical application problem"""
-        
-        scenarios = physics_content.get("problem_scenarios", [])
-        if not scenarios:
+        if not concepts["numerical_values"]:
             return None
         
+        numerical_data = concepts["numerical_values"][:3]  # Use up to 3 values
+        related_equations = concepts["equations"][:2] if concepts["equations"] else []
+        
+        problem_statement = f"""Using the numerical data and relationships from a {paper.subject} analysis:
+
+**Given Data**:
+"""
+        
+        for value in numerical_data:
+            problem_statement += f"• {value}\n"
+        
+        if related_equations:
+            problem_statement += "\n**Relevant Relationships**:\n"
+            for eq in related_equations:
+                problem_statement += f"• {eq}\n"
+        
+        problem_statement += f"""
+**Calculation Tasks**:
+1. Verify that all given quantities have consistent units
+2. Calculate any derived quantities that can be determined from the given data
+3. Estimate the order of magnitude for key physical parameters
+4. Determine which quantities might be measurable experimentally
+5. Assess the physical reasonableness of the numerical values
+
+**Analysis Requirements**:
+- Show all unit conversions explicitly
+- Provide uncertainty estimates where appropriate  
+- Explain the physical significance of calculated results
+- Compare values to typical scales in {paper.subject.lower()}"""
+        
         return {
-            "problem_id": f"application_{domain}_{hash(str(scenarios)) % 10000}",
-            "type": "practical_application",
+            "problem_id": f"numerical_analysis_{paper.id}_{hash(str(numerical_data)) % 10000}",
+            "type": "numerical_analysis",
             "difficulty": "intermediate",
-            "domain": domain,
-            "problem_statement": self._generate_application_statement(scenarios[0], domain),
+            "domain": self._classify_physics_domain(paper.subject),
+            "problem_statement": problem_statement,
+            "source_content": {
+                "numerical_data": numerical_data,
+                "related_equations": related_equations
+            },
             "evaluation_criteria": [
-                "Identification of relevant physics principles",
-                "Appropriate mathematical modeling",
-                "Realistic assumptions and approximations",
-                "Correct order-of-magnitude results"
+                "Correct unit analysis and conversions",
+                "Accurate numerical calculations",
+                "Physical interpretation of results",
+                "Order of magnitude reasoning"
             ]
         }
     
-    def _generate_application_statement(self, scenario: str, domain: str) -> str:
-        """Generate practical application problem"""
+    def _is_meaningful_equation(self, equation: str) -> bool:
+        """Check if equation contains meaningful physics content"""
         
-        if "oscillator" in scenario:
-            return """Design a mechanical oscillator system for a precision timing application.
-
-Requirements:
-- Period stability of 1 part in 10⁶
-- Operating temperature range: 0°C to 50°C
-- Amplitude variations less than ±5%
-
-Consider:
-1. What type of oscillator would be most suitable (simple pendulum, torsional, spring-mass)?
-2. How do temperature variations affect the period?
-3. What materials would minimize temperature sensitivity?
-4. How do you account for air resistance and other damping effects?
-5. What are the fundamental physical limits to timing precision?
-
-Provide quantitative estimates and justify your design choices with physics principles."""
+        # Must have mathematical content
+        if '=' not in equation:
+            return False
         
-        elif "field" in scenario:
-            return """Calculate the electromagnetic field configuration for a particle accelerator design.
-
-Specifications:
-- Accelerate protons from rest to 10% speed of light
-- Acceleration distance: 1 meter
-- Uniform electric field region
-
-Determine:
-1. Required electric field strength
-2. Energy gained by the proton
-3. Time required for acceleration
-4. Power requirements (assuming 1000 protons/second)
-5. Relativistic corrections to the motion
-
-Consider the engineering constraints and safety requirements for such high-voltage systems."""
+        # Check for physics variables
+        physics_vars = ['E', 'F', 'V', 'p', 'm', 'v', 'a', 'g', 'H', 'L', 'T', 'P', 'ρ', 'σ', 'ω', 'λ', 'μ', 'ε']
+        has_physics_vars = any(var in equation for var in physics_vars)
         
-        else:
-            return """Analyze the physics of a real-world system that demonstrates the principles under discussion.
-
-Your analysis should include:
-1. Identification of the key physics principles involved
-2. Mathematical modeling of the system behavior
-3. Reasonable approximations and their justifications
-4. Comparison with experimental or observational data
-5. Discussion of limitations and potential improvements
-
-Choose a system that illustrates both the power and limitations of the theoretical framework."""
+        # Check for mathematical operators
+        has_math_ops = any(op in equation for op in ['+', '-', '*', '/', '^', '∇', '∂', '∫'])
+        
+        # Must be substantial enough
+        is_substantial = len(equation.strip()) > 8
+        
+        return has_physics_vars and has_math_ops and is_substantial
+    
+    def _contains_physics_content(self, text: str) -> bool:
+        """Check if text contains actual physics content"""
+        
+        physics_terms = [
+            'energy', 'force', 'field', 'particle', 'wave', 'mass', 'velocity',
+            'momentum', 'charge', 'potential', 'frequency', 'wavelength',
+            'temperature', 'pressure', 'density', 'current', 'voltage',
+            'magnetic', 'electric', 'quantum', 'classical', 'relativistic'
+        ]
+        
+        text_lower = text.lower()
+        physics_count = sum(1 for term in physics_terms if term in text_lower)
+        
+        # Also check for mathematical content
+        has_math = any(char in text for char in ['=', '+', '-', '*', '/', '(', ')', '^'])
+        
+        return physics_count >= 1 or has_math
+    
+    def _is_meaningful_numerical_value(self, value: str) -> bool:
+        """Check if numerical value is meaningful for physics"""
+        
+        # Must contain actual numbers
+        if not re.search(r'\d', value):
+            return False
+        
+        # Check for physics units or contexts
+        physics_contexts = [
+            'm', 'kg', 's', 'Hz', 'eV', 'K', 'Pa', 'N', 'J', 'W', 'V', 'A', 'T',
+            'wavelength', 'frequency', 'energy', 'mass', 'velocity', 'temperature'
+        ]
+        
+        has_physics_context = any(context in value.lower() for context in physics_contexts)
+        
+        # Must be substantial
+        is_substantial = len(value.strip()) > 5
+        
+        return has_physics_context and is_substantial
     
     def _classify_physics_domain(self, subject: str) -> str:
         """Classify physics domain from subject"""
@@ -601,18 +458,19 @@ Choose a system that illustrates both the power and limitations of the theoretic
         else:
             return "general_physics"
     
-    def _assess_problem_difficulty(self, physics_content: Dict) -> str:
-        """Assess overall difficulty level"""
+    def _assess_problem_difficulty(self, concepts: Dict) -> str:
+        """Assess difficulty based on actual extracted concepts"""
         
-        # Count advanced concepts
         advanced_indicators = 0
         
-        for equation in physics_content.get("equations", []):
-            if any(term in equation.lower() for term in ["tensor", "differential", "integral", "eigenvalue"]):
+        # Check for advanced mathematical content
+        for equation in concepts.get("equations", []):
+            if any(term in equation.lower() for term in ["tensor", "∇", "∂", "∫", "eigenvalue"]):
                 advanced_indicators += 1
         
-        for method in physics_content.get("mathematical_methods", []):
-            if any(term in method for term in ["perturbation", "fourier", "eigenvalue"]):
+        # Check for advanced physics concepts
+        for principle in concepts.get("physics_principles", []):
+            if any(term in principle.lower() for term in ["quantum field", "relativity", "symmetry"]):
                 advanced_indicators += 1
         
         if advanced_indicators >= 3:
@@ -625,36 +483,29 @@ Choose a system that illustrates both the power and limitations of the theoretic
     def _is_suitable_for_benchmark(self, paper, full_text: str) -> bool:
         """Check if paper is suitable for benchmark creation"""
         
-        if not full_text or len(full_text.strip()) < 1000:
+        if not full_text or len(full_text.strip()) < 800:
             return False
         
-        # Check for substantial physics content
+        # Must have substantial physics/mathematical content
+        has_equations = '=' in full_text and len(re.findall(r'[A-Za-z]\s*=', full_text)) >= 2
+        
         physics_indicators = [
-            'equation', 'energy', 'force', 'field', 'particle', 'wave',
-            'quantum', 'relativity', 'conservation', 'momentum', 'mass'
+            'energy', 'force', 'field', 'particle', 'wave', 'quantum',
+            'equation', 'formula', 'derivation', 'calculation'
         ]
         
-        text_lower = full_text[:2000].lower()
-        physics_count = sum(1 for indicator in physics_indicators if indicator in text_lower)
+        text_sample = full_text[:2000].lower()
+        physics_count = sum(1 for indicator in physics_indicators if indicator in text_sample)
         
-        return physics_count >= 5
+        return has_equations or physics_count >= 4
     
     def _clean_equation(self, equation: str) -> str:
         """Clean and format equation"""
         # Remove extra whitespace and format
         cleaned = re.sub(r'\s+', ' ', equation.strip())
-        # Remove common artifacts
-        cleaned = re.sub(r'[^\w\s=+\-*/(){}\\.,]', '', cleaned)
+        # Remove common artifacts but keep mathematical symbols
+        cleaned = re.sub(r'[^\w\s=+\-*/(){}\\.,∇∂∫α-ωΑ-Ω]', '', cleaned)
         return cleaned
-    
-    def _load_problem_templates(self) -> Dict:
-        """Load problem templates for different physics domains"""
-        return {
-            "mechanics": ["force_derivation", "energy_conservation", "momentum_conservation"],
-            "electromagnetism": ["field_calculation", "wave_propagation", "circuit_analysis"],
-            "quantum": ["schrodinger_equation", "eigenvalue_problems", "measurement_theory"],
-            "thermodynamics": ["entropy_calculation", "cycle_efficiency", "phase_transitions"]
-        }
     
     def save_benchmark(self, benchmark_items: List[Dict]) -> str:
         """Save self-contained benchmark to file"""
@@ -665,11 +516,11 @@ Choose a system that illustrates both the power and limitations of the theoretic
         benchmark_data = {
             "metadata": {
                 "created_at": datetime.now().isoformat(),
-                "benchmark_type": "self_contained_physics_reasoning",
+                "benchmark_type": "self_contained_physics_reasoning_from_papers",
                 "total_problems": sum(len(item.get("problems", [])) for item in benchmark_items),
                 "total_sets": len(benchmark_items),
                 "format_version": "2.0",
-                "description": "Self-contained physics reasoning problems without paper references"
+                "description": "Self-contained physics problems using actual concepts from research papers"
             },
             "problem_sets": benchmark_items
         }
