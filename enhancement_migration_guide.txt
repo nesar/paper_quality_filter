@@ -1,0 +1,131 @@
+# Enhanced Paper Quality Filter - Migration Guide
+
+## Key Improvements
+
+### 1. Self-Contained Benchmarks (No Paper References)
+- **Problem**: Original benchmarks referenced papers in questions
+- **Solution**: New `SelfContainedBenchmarkBuilder` creates physics problems that stand alone
+- **Benefit**: Benchmarks can be used without accessing original papers
+
+### 2. High-Quality RL Training Data
+- **Problem**: Original training data had language quality issues and unclear problem statements
+- **Solution**: New `ChainOfThoughtTrainingBuilder` with strict English filtering and clear problem-solution pairs
+- **Benefit**: Training data suitable for high-quality reasoning model development
+
+## File Structure Changes
+
+```
+paper_quality_filter/
+├── enhanced_paper_analyser.py          # NEW: Enhanced main entry point
+├── paper_analyser.py                   # UNCHANGED: Original entry point
+├── analysis/
+│   ├── enhanced_benchmark_builder.py  # NEW: Self-contained benchmarks
+│   ├── enhanced_training_builder.py   # NEW: High-quality RL training
+│   ├── pdf_processor.py               # ENHANCED: Better extraction
+│   └── classifier.py                  # UNCHANGED
+└── ... (other files unchanged)
+```
+
+## Usage
+
+### Quick Start (Enhanced Version)
+```bash
+# Create self-contained benchmarks + RL training data
+python enhanced_paper_analyser.py \
+    --source vixra \
+    --provider gemini \
+    --gemini-key $GEMINI_API_KEY \
+    --category astro-ph \
+    --max-papers 10 \
+    --create-benchmark \
+    --create-training
+```
+
+### Original Version (Still Available)
+```bash
+# Original functionality still works
+python paper_analyser.py \
+    --source arxiv \
+    --provider openai \
+    --openai-key $OPENAI_API_KEY \
+    --category quant-ph \
+    --max-papers 5
+```
+
+## Output Structure
+
+### Enhanced Analysis Output
+```
+enhanced_analysis_YYYYMMDD_HHMMSS/
+├── analysis_results/                     # Individual paper analyses
+├── benchmark/                            # Self-contained benchmarks
+│   └── self_contained_physics_benchmark_YYYYMMDD_HHMMSS.json
+├── training_data/                        # High-quality RL training
+│   └── rl_chain_of_thought_training_YYYYMMDD_HHMMSS.json
+└── enhanced_analysis_summary.json        # Consolidated summary
+```
+
+## Key Features
+
+### Self-Contained Benchmarks
+- **No paper references** in problem statements
+- **Complete physics context** included in each problem
+- **UGPhysics-style** mathematical derivation problems
+- **Error detection** problems based on identified issues
+- **Conceptual analysis** problems for deeper understanding
+
+### High-Quality RL Training Data
+- **Strict English filtering** ensures language quality
+- **Clear problem statements** with proper physics context
+- **DeepSeek-R1 style** `<think>` sections for reasoning
+- **Quality scoring** based on reasoning coherence
+- **Multiple formats**: derivations, problem-solving, step-by-step
+
+## Quality Standards
+
+### Benchmark Quality
+- Problems must be completely self-contained
+- No references to "the paper" or "this work"
+- Clear mathematical statements with all necessary context
+- Proper physics terminology and notation
+
+### Training Data Quality
+- Minimum reasoning quality score: 0.5 (raised from 0.3)
+- English quality verification for all text
+- Substantial physics/mathematical content required
+- Clear problem-solution structure with logical flow
+
+## Migration Benefits
+
+1. **Better Benchmarks**: Can be used independently without paper access
+2. **Higher Quality Training**: Suitable for training reasoning models
+3. **Modular Design**: Enhanced builders can be used separately
+4. **Backward Compatibility**: Original functionality still available
+5. **Better Documentation**: Clear output structure and quality metrics
+
+## Example Quality Improvements
+
+### Before (Original)
+```json
+{
+  "question": "Analyze this paper's approach to quantum field theory...",
+  "context": {"paper_id": "1234.5678", "title": "Some Paper"}
+}
+```
+
+### After (Enhanced)
+```json
+{
+  "problem_statement": "For a quantum mechanical particle in a one-dimensional infinite square well of width L, derive the allowed energy levels starting from the Schrödinger equation...",
+  "type": "mathematical_derivation",
+  "evaluation_criteria": ["Mathematical rigor", "Physics principles", "Dimensional consistency"]
+}
+```
+
+## Integration with Existing Workflow
+
+The enhanced version is designed to be a drop-in replacement:
+- Same command-line interface
+- Additional features enabled by default
+- Backward compatible with existing scripts
+- Enhanced output provides more value while maintaining original functionality
