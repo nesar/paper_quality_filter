@@ -20,7 +20,7 @@ def stage_1_sophistication_prompt(title, authors, subject, abstract, text_sample
     
     EXCLUDE (sophistication_score < 0.4) if paper contains:
     - Conspiracy theories about physics establishment
-    - Claims of "disproving Einstein" without mathematical rigor
+    - Claims of "disproving Einstein" or "disproving Maxwell" without mathematical rigor
     - Perpetual motion or free energy claims
     - Pure numerology without physical reasoning
     - Obvious word salad or incoherent arguments

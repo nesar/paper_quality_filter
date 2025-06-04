@@ -17,7 +17,7 @@ from nougat.utils.checkpoint import get_checkpoint
 from PIL import Image
 import torch
 NOUGAT_AVAILABLE = True
-from typing import Optional
+
 
 class PDFProcessor:
     """Handles PDF text extraction and processing"""
@@ -265,19 +265,6 @@ class NougatPDFProcessor:
         """
         self.model = None
         # self.device = device or get_device() if NOUGAT_AVAILABLE else "cpu"
-
-        if device:
-            self.device = device
-        else:
-            # prefer MPS on macOS, otherwise CUDA if available, else CPU
-            if torch.backends.mps.is_available():
-                self.device = "mps"
-            elif torch.cuda.is_available():
-                self.device = "cuda"
-            else:
-                self.device = "cpu"
-
-
         self.model_name = model_name
         
         if NOUGAT_AVAILABLE:

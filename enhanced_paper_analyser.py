@@ -1493,7 +1493,7 @@ async def run_enhanced_analysis(args):
             pdf_success = await scraper.download_pdf(paper)
             if pdf_success:
                 print(f"PDF downloaded successfully: {paper.pdf_path}")
-                paper.full_text, paper.metadata = PDFProcessor.extract_text(paper.pdf_path)
+                paper.full_text, paper.metadata = EnhancedPDFProcessor.extract_text(paper.pdf_path)
                 print(f"PDF processed: {paper.metadata.get('word_count', 0)} words")
             else:
                 print("PDF download failed - using abstract only")
